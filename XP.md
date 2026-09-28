@@ -12,17 +12,18 @@ point of earning (only summed for the total/level).
 | Action | Category | XP |
 |---|---|---|
 | Message sent in Gesprek or Revisie, typed only, ≥2 words | writing | **+2** |
-| Message sent in Gesprek or Revisie, voice contributed at any point, ≥2 words | speaking | **+3** |
-| Chat/Revisie audio — first play of that clip | listening | **+5** |
+| Message sent in Gesprek or Revisie, voice contributed at any point, ≥2 words | speaking | **+2** |
+| Chat/Revisie audio — first play of that clip | listening | **+3** |
 | Chat/Revisie audio — any replay of that same clip | listening | **+0** (no repeat credit) |
-| Leesoefening reading timer — first 5 continuous minutes | reading | **+30** |
-| Leesoefening reading timer — each additional full minute | reading | **+5** |
-| Hands-free loop (Audiobibliotheek) — first 5 continuous minutes | listening | **+30** |
-| Hands-free loop — each additional full minute | listening | **+5** |
+| Leesoefening reading timer — first 5 continuous minutes | reading | **+15** |
+| Leesoefening reading timer — each additional full minute | reading | **+2** |
+| Hands-free loop (Audiobibliotheek) — first 5 continuous minutes | listening | **+15** |
+| Hands-free loop — each additional full minute | listening | **+2** |
 
 A message under 2 words earns nothing (blocks one-word spam). Voice input counts as speaking
 even if you hand-edit the text afterward — once voice touches the draft, it's speaking until
-you send or clear it.
+you send or clear it. Writing and speaking are worth the same now (2 XP each) — no bonus for
+choosing voice over typing.
 
 ## Vocabulary — a separate, one-time-plus-ongoing term
 
@@ -86,30 +87,33 @@ at the 3 XP/word ongoing rate), split evenly across the 4 pillars:
 | Pillar | Amount | Notes |
 |---|---|---|
 | New words | ~2,500 words | at 3 XP/word |
-| Messages | ~3,750 typed, or ~2,500 voice, or ~3,000 mixed | at 2 / 3 XP each |
-| Listening (chat/revisie plays) | ~1,500 distinct new clips | replays don't count |
-| Listening (hands-free loop) | ~1,499 min (~25 hrs) | alternate path, same pool |
-| Reading (Leesoefening timer) | ~1,499 min (~25 hrs) | |
+| Messages | ~3,750 messages | typed and voice both 2 XP now |
+| Listening (chat/revisie plays) | ~2,500 distinct new clips | replays don't count |
+| Listening (hands-free loop) | ~3,748 min (~62.5 hrs) | alternate path, same pool |
+| Reading (Leesoefening timer) | ~3,748 min (~62.5 hrs) | |
 
-Over the app's own 5-month (~150 day) B1 goal: **~17 words/day, ~20 messages/day, ~10 min/day
-reading, ~10 min/day loop-listening** (or ~10 new clips/day via chat instead).
+Over the app's own 5-month (~150 day) B1 goal: **~17 words/day, ~25 messages/day, ~25 min/day
+reading, ~25 min/day loop-listening** (or ~17 new clips/day via chat instead).
 
 **To Level 200 / ≈C1 — 120,000 XP total, 30,000 XP per pillar:**
 
 | Pillar | Amount | Notes |
 |---|---|---|
 | New words | ~10,000 words | |
-| Messages | ~15,000 typed, or ~10,000 voice, or ~12,000 mixed | |
-| Listening (chat/revisie plays) | ~6,000 distinct new clips | |
-| Listening (hands-free loop) | ~5,999 min (~100 hrs) | alternate path |
-| Reading (Leesoefening timer) | ~5,999 min (~100 hrs) | |
+| Messages | ~15,000 messages | |
+| Listening (chat/revisie plays) | ~10,000 distinct new clips | |
+| Listening (hands-free loop) | ~14,998 min (~250 hrs) | alternate path |
+| Reading (Leesoefening timer) | ~14,998 min (~250 hrs) | |
 
-Over an illustrative ~2-year C1 horizon: **~14 words/day, ~16 messages/day, ~8 min/day
-reading, ~8 min/day loop-listening.**
+Over an illustrative ~2-year C1 horizon: **~14 words/day, ~21 messages/day, ~21 min/day
+reading, ~21 min/day loop-listening.**
 
 These are illustrative (assumes an even split across pillars and a brand-new baseline) — in
 practice XP arrives unevenly and vocabulary you already knew before this feature existed gives
-a head start (15 XP/word instead of 3).
+a head start (15 XP/word instead of 3). Note the two time-based pillars (reading, loop-listening)
+are the slowest per minute now — the per-action XP for messages/vocab/clips didn't change
+much, but the time curve was cut roughly in half, so sustained daily listening/reading time
+matters more than before to keep pace with the other two pillars.
 
 ## Where this lives in code
 

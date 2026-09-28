@@ -136,10 +136,10 @@ const countWords = (s) => (String(s).trim().match(/\S+/g) || []).length;
 /* ================= XP / gamification ================= */
 // Flat per-action rewards. Vocabulary is deliberately NOT one of the 4 practice categories
 // (reading/speaking/listening/writing) — it's a separate foundational term, see vocabXp() below.
-const XP = { writing: 2, speaking: 3, listenFirst: 5 };
+const XP = { writing: 2, speaking: 2, listenFirst: 3 };
 // Time-based curve shared by the Leesoefening timer and the Hands-free loop: nothing for the
-// first 5 minutes, then 30 XP at the 5-minute mark, +5 XP per additional full minute.
-const timeXpAt = (sec) => (sec < 300 ? 0 : 30 + 5 * Math.floor((sec - 300) / 60));
+// first 5 minutes, then 15 XP at the 5-minute mark, +2 XP per additional full minute.
+const timeXpAt = (sec) => (sec < 300 ? 0 : 15 + 2 * Math.floor((sec - 300) / 60));
 const timeXpDelta = (prevSec, newSec) => timeXpAt(newSec) - timeXpAt(prevSec);
 // Words already known when the feature first activates are credited once at the higher rate
 // (settings.xpVocabBaselineWords, frozen forever); every word learned after that is cheaper —
@@ -320,7 +320,7 @@ function streakOf(daily) {
 
 // Files on disk, served by the local server: data/vocab.json, data/progress.json, ...
 const K = { vocab: "vocab", prog: "progress", set: "settings", chat: "chat", explain: "explanations",
-  reading: "reading" };
+  reading: "reading", persona: "persona" };
 
 async function loadAll() {
   const r = await fetch("/api/state");
@@ -397,6 +397,9 @@ export default function App() {
   // and outlives chat deletion — see getExplanation() below.
   const [explanations, setExplanations] = useState({});
   const [readingLibrary, setReadingLibrary] = useState([]);
+  // Durable facts about the learner, consolidated in the background — see consolidatePersona()
+  // below. No settings UI on purpose — edit data/persona.json by hand if you ever need to.
+  const [persona, setPersona] = useState({ facts: [], lastConsolidatedAt: null });
   const [settings, setSettings] = useState({
     level: "A2", voiceURI: "", rate: 0.9, bilingualUI: true,
     targets: 2, topic: "", autoplay: true, tts: "google", gVoice: "nl-NL-Wavenet-D", model: "",
@@ -446,6 +449,7 @@ export default function App() {
         setDaily(st.progress?.daily || {});
         setExplanations(st.explanations || {});
         setReadingLibrary(st.reading || []);
+        setPersona(st.persona || { facts: [], lastConsolidatedAt: null });
         if (st.settings && Object.keys(st.settings).length) setSettings((x) => ({ ...x, ...st.settings }));
         setMessages(st.chat || []);
 
@@ -616,6 +620,9 @@ ${settings.topic ? `- Onderwerp of situatie: ${settings.topic}.` : ""}
 ${settings.customInstructions ? `
 OVER JOU (DE DOCENT)
 ${settings.customInstructions}
+` : ""}${persona.facts.length ? `
+WAT JE AL WEET OVER DE LEERLING (als persoon — gebruik dit natuurlijk waar het past, forceer het niet)
+${persona.facts.map((f) => `- ${f}`).join("\n")}
 ` : ""}
 CORRECTIES
 - Corrigeer ALLEEN het NIEUWSTE bericht van de leerling (de laatste user-beurt, hieronder). De eerdere
@@ -734,6 +741,17 @@ ${knownSample || "(nog geen lijst geïmporteerd — gebruik alleen de 500 meest 
       });
 
       if (nWords >= 2) awardXp(fromVoice ? "speaking" : "writing", fromVoice ? XP.speaking : XP.writing);
+
+      // Every 5th user message, kick off a background memory update — not awaited, so it
+      // can't delay this reply. `history` is everything before this turn, so + this turn's
+      // user/AI pair is the true user-turn count so far.
+      const userTurnCount = history.filter((m) => m.role === "user").length + 1;
+      if (userTurnCount % 5 === 0) {
+        const snippet = [...history.slice(-8), { role: "user", text }, { role: "ai", reply }]
+          .map((m) => (m.role === "user" ? `Leerling: ${m.text}` : `AI: ${String(m.reply || "").replace(/\*\*/g, "")}`))
+          .join("\n");
+        consolidatePersona(snippet);
+      }
 
       if (reply && settings.autoplay) setTimeout(() => speak(reply), 220);
     } catch (e) {
@@ -883,6 +901,25 @@ ${knownSample || "(nog geen lijst geïmporteerd — gebruik alleen de 500 meest 
       const d = await r.json();
       if (r.ok && d.en) updateMistakeStats(id, { en: d.en });
     } catch { /* not fatal — revision mode falls back to translating on demand */ }
+  }
+
+  // Fire-and-forget, called every 5 user messages from send() — never awaited, so it can't
+  // add latency to the reply the learner is waiting for. Sends the current fact list plus a
+  // short recent-conversation snippet; the server returns the FULL revised list (merge/update/
+  // drop), not just new additions, so it stays a bounded size regardless of total chat history.
+  async function consolidatePersona(transcript) {
+    try {
+      const r = await fetch("/api/persona", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ facts: persona.facts, transcript, model: settings.model || undefined })
+      });
+      const d = await r.json();
+      if (r.ok && Array.isArray(d.facts)) {
+        const next = { facts: d.facts, lastConsolidatedAt: Date.now() };
+        setPersona(next);
+        save(K.persona, next);
+      }
+    } catch { /* not fatal — just skip this round, next trigger tries again */ }
   }
 
   // Removes a single word from the known-vocabulary list — the only way to shrink it now

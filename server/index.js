@@ -205,6 +205,13 @@ const READING_SCHEMA = {
   required: ["title", "text", "translation"]
 };
 
+const PERSONA_SCHEMA = {
+  type: "OBJECT",
+  propertyOrdering: ["facts"],
+  properties: { facts: { type: "ARRAY", items: { type: "STRING" } } },
+  required: ["facts"]
+};
+
 const WORD_CHECK_SCHEMA = {
   type: "OBJECT",
   propertyOrdering: ["usesWord", "corrections", "note"],
@@ -254,7 +261,10 @@ const FILES = {
   // clearing the chat and is shared with the same sentence's entry on the Library page.
   explanations: {},
   // Saved reading-exercise stories — see the Leesoefening tab's "Bewaren" button.
-  reading: []
+  reading: [],
+  // Durable facts about the learner, consolidated in the background every 5 messages — see
+  // /api/persona and consolidatePersona() in App.jsx. Manually editable only (no settings UI).
+  persona: { facts: [], lastConsolidatedAt: null }
 };
 
 async function readState(name) {
@@ -617,6 +627,49 @@ geen uitleg, geen aanhalingstekens.`;
     const { parsed, usage } = await callGemini(use, system, text, TRANSLATE_SCHEMA, { maxOutputTokens: 150 });
     logUsage(use, usage, Date.now() - t0);
     res.json({ en: String(parsed.en || ""), usage });
+  } catch (e) { res.status(e.status || 502).json({ error: String(e.message || e) }); }
+});
+
+/* ---------------- persona: background memory consolidation ----------------
+   Fired fire-and-forget from send() every 5 user messages — never blocks the chat reply.
+   Takes the CURRENT fact list plus a short recent-conversation snippet and returns the FULL
+   revised list (merge/update/drop), not just new additions, so it stays a bounded size
+   forever instead of growing with total conversation history. Same idea as ChatGPT's
+   background memory consolidation. */
+
+app.post("/api/persona", async (req, res) => {
+  if (!MODEL_KEY) return res.status(500).json({ error: `${KEY_VAR} ontbreekt in .env` });
+  const existing = (Array.isArray(req.body?.facts) ? req.body.facts : []).map(String).filter(Boolean);
+  const transcript = String(req.body?.transcript || "").trim();
+  if (!transcript) return res.json({ facts: existing });
+
+  const use = String(req.body.model || MODEL);
+  const t0 = Date.now();
+  const system = `You maintain a short, durable memory profile of a language-learning app's
+user, built from their conversation practice (the practice language may not be English —
+that's fine, extract facts about the PERSON, not their language level).
+
+CURRENT MEMORY (may be empty):
+${existing.length ? existing.map((f) => `- ${f}`).join("\n") : "(nothing yet)"}
+
+Update it based on the new conversation snippet below. Rules:
+- Return the FULL revised list, not just new additions — merge, update, or remove entries.
+- Prefer DURABLE facts (interests, life situation, personality, recurring topics, ongoing
+  plans/goals, relationships) over one-off or already-resolved details from a single message.
+- If something changes or is superseded (e.g. a trip that already happened, a plan that
+  changed), REVISE that entry in place instead of keeping both the old and new version.
+- Each fact: one short, specific, plain-English sentence — written so a friend could
+  naturally bring it up later in conversation.
+- Maximum 30 facts total. If you'd exceed that, drop the least useful/most stale ones.
+- This is NOT about grammar or language-level (that's tracked elsewhere) — only facts about
+  the person as an individual.
+- If the snippet has nothing memorable, return the current memory completely unchanged.`;
+
+  try {
+    const { parsed, usage } = await callGemini(use, system, transcript, PERSONA_SCHEMA, { maxOutputTokens: 900 });
+    logUsage(use, usage, Date.now() - t0);
+    const facts = (Array.isArray(parsed.facts) ? parsed.facts : []).map(String).filter(Boolean).slice(0, 30);
+    res.json({ facts, usage });
   } catch (e) { res.status(e.status || 502).json({ error: String(e.message || e) }); }
 });
 
