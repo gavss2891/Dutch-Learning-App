@@ -11,9 +11,14 @@ const ROOT = process.cwd();
 const DATA = path.join(ROOT, "data");
 const AUDIO = path.join(ROOT, "audio");
 const EXPORTS = path.join(ROOT, "exports");
+// Celebration gifs — served straight off disk (see /api/gifs and the /gifs static route
+// below), not bundled by Vite, so dropping a file in here or deleting one takes effect
+// immediately, with no rebuild.
+const GIFS = path.join(ROOT, "gifs");
 fs.mkdirSync(DATA, { recursive: true });
 fs.mkdirSync(AUDIO, { recursive: true });
 fs.mkdirSync(EXPORTS, { recursive: true });
+fs.mkdirSync(GIFS, { recursive: true });
 
 // Exported mixdowns are disposable — generated on demand, meant to be downloaded once and
 // kept on the phone, not archived here. Sweep anything older than a day so they don't pile up.
@@ -306,6 +311,19 @@ setInterval(flushIndex, 4000).unref();
 process.on("SIGINT", () => { flushIndex(); process.exit(0); });
 
 app.use("/audio", express.static(AUDIO, { maxAge: "365d", immutable: true }));
+
+/* ---------------- celebration gifs: whatever's in gifs/ right now, no build step ---------------- */
+
+const GIF_EXT = new Set([".gif", ".webp", ".png", ".jpg", ".jpeg"]);
+
+app.use("/gifs", express.static(GIFS));
+
+app.get("/api/gifs", async (_req, res) => {
+  try {
+    const files = (await fsp.readdir(GIFS)).filter((f) => GIF_EXT.has(path.extname(f).toLowerCase()));
+    res.json({ files });
+  } catch (e) { res.status(500).json({ error: String(e.message || e) }); }
+});
 
 const keyFor = (voice, text) =>
   crypto.createHash("sha1").update(voice + "\u0000" + text).digest("hex").slice(0, 20);

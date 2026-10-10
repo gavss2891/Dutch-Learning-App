@@ -7,7 +7,7 @@ import {
   MessageSquare, BookOpen, AlertCircle, Sparkles, TrendingUp, Settings,
   Play, Volume2, Download, Upload, Trash2, Check, Search, Send,
   Clock, Plus, X, Pause, RotateCcw, VolumeX, Headphones, Eye, Languages, HelpCircle,
-  Mic, Square, Star, Info, GraduationCap, Save, BookOpenText, Trophy, PenLine
+  Mic, Square, Star, Info, GraduationCap, Save, BookOpenText, Trophy, PenLine, PartyPopper
 } from "lucide-react";
 
 /* ============================================================
@@ -424,8 +424,20 @@ export default function App() {
   // mastery flow and add straight to the vocab list, so both need the same "are you sure"
   // gate. null = no confirmation open.
   const [confirmKnownWord, setConfirmKnownWord] = useState(null);
-  // { level } while a level-up celebration is showing, null otherwise — set by awardXp() below.
-  const [levelUp, setLevelUp] = useState(null);
+  // { kind: "levelup", level } | { kind: "revision" } | { kind: "words" } while a celebration
+  // overlay is showing, null otherwise — set by awardXp() below, or by RevisionPanel/LearnPanel
+  // finishing everything due for the day.
+  const [celebration, setCelebration] = useState(null);
+  // Whatever's in gifs/ on disk right now — fetched once at startup, not hardcoded, so
+  // dropping a file in that folder (or deleting one) changes what can show up here with no
+  // code change or rebuild. Empty means the gif just doesn't show; confetti still does.
+  const [gifPool, setGifPool] = useState([]);
+  useEffect(() => {
+    fetch("/api/gifs").then((r) => r.json())
+      .then((d) => setGifPool(Array.isArray(d.files) ? d.files : []))
+      .catch(() => {});
+  }, []);
+  const pickGif = () => (gifPool.length ? gifPool[Math.floor(Math.random() * gifPool.length)] : null);
 
   const voices = useVoices();
   const knownSet = useMemo(() => buildKnownSet(vocab.words), [vocab.words]);
@@ -972,7 +984,7 @@ ${knownSample || "(nog geen lijst geïmporteerd — gebruik alleen de 500 meest 
       const k = today();
       const next = { ...d, [k]: addXp(d[k] || emptyDay(), category, amount) };
       const after = levelOf(totalXp(next, vocab.words.length, settings.xpVocabBaselineWords));
-      if (after > before) setLevelUp({ level: after });
+      if (after > before) setCelebration({ kind: "levelup", level: after, gif: pickGif() });
       save(K.prog, { corrections, ledger, daily: next });
       return next;
     });
@@ -1194,11 +1206,13 @@ Below: charts of error rate and daily activity.`],
           {tab === "mistakes" && <MistakesView {...{ corrections, speak, settings, T, Ts, removeCorrection,
             explanations, getExplanation }} />}
           {tab === "revision" && <RevisionPanel {...{ speak, settings, T, Ts, corrections, updateMistakeStats,
-            explanations, getExplanation, showForecast, getClip, awardXp }} />}
+            explanations, getExplanation, showForecast, getClip, awardXp,
+            onComplete: () => setCelebration({ kind: "revision", gif: pickGif() }) }} />}
           {tab === "words" && <WordsView {...{ ledger, speak, T, Ts, removeWord,
             requestMarkKnown, settings, goLearn }} />}
           {tab === "learn" && <LearnPanel {...{ ledger, vocab, speak, settings, T, Ts,
-            updateWordStats, markKnown, prewarmWordPractice }} />}
+            updateWordStats, markKnown, prewarmWordPractice,
+            onComplete: () => setCelebration({ kind: "words", gif: pickGif() }) }} />}
           {tab === "library" && <LibraryView {...{ settings, T, Ts, explanations, getExplanation, awardXp }} />}
           {tab === "progress" && <ProgressView {...{ daily, corrections, ledger, vocab, settings, T, Ts }} />}
           {tab === "settings" && <SettingsView {...{ settings, setSettings, voices, speak, getClip, vocab,
@@ -1249,17 +1263,70 @@ Below: charts of error rate and daily activity.`],
         </div>
       )}
 
-      {levelUp && (
-        <div className="modal-backdrop" onClick={() => setLevelUp(null)}>
+      {celebration && (
+        <div className="modal-backdrop" onClick={() => setCelebration(null)}>
+          <Confetti />
           <div className="modal levelup" onClick={(e) => e.stopPropagation()}>
-            <div className="levelup-badge"><Trophy strokeWidth={2} /></div>
-            <h3>{Ts("Niveau omhoog!", "Level up!")}</h3>
-            <div className="levelup-n">{levelUp.level}</div>
-            <p>{Ts("Goed bezig — blijf zo doorgaan.", "Great work — keep it up.")}</p>
-            <button className="btn" onClick={() => setLevelUp(null)}>{Ts("Verder", "Continue")}</button>
+            {celebration.gif && (
+              <img className="levelup-gif" src={"/gifs/" + encodeURIComponent(celebration.gif)} alt=""
+                onError={(e) => { e.currentTarget.style.display = "none"; }} />
+            )}
+            {celebration.kind === "levelup" ? (
+              <>
+                <div className="levelup-badge"><Trophy strokeWidth={2} /></div>
+                <h3>{Ts("Niveau omhoog!", "Level up!")}</h3>
+                <div className="levelup-n">{celebration.level}</div>
+                <p>{Ts("Goed bezig — blijf zo doorgaan.", "Great work — keep it up.")}</p>
+              </>
+            ) : celebration.kind === "revision" ? (
+              <>
+                <div className="levelup-badge"><PartyPopper strokeWidth={2} /></div>
+                <h3>{Ts("Revisie klaar!", "Revision done!")}</h3>
+                <p>{Ts("Alle zinnen voor vandaag zijn gehad — kom morgen terug voor meer.",
+                  "Every sentence due today is done — come back tomorrow for more.")}</p>
+              </>
+            ) : (
+              <>
+                <div className="levelup-badge"><PartyPopper strokeWidth={2} /></div>
+                <h3>{Ts("Voor nu klaar!", "All caught up!")}</h3>
+                <p>{Ts("Je hebt alle woorden voor vandaag geoefend — morgen de volgende batch.",
+                  "You've practiced every word due today — the next batch is tomorrow.")}</p>
+              </>
+            )}
+            <button className="btn" onClick={() => setCelebration(null)}>{Ts("Verder", "Continue")}</button>
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+/* ================= confetti burst, for the celebration overlay ================= */
+
+const CONFETTI_COLORS = ["#2A55C8", "#CE3F3F", "#E8A33D", "#3F9A5C", "#8B5FBF"];
+
+function Confetti() {
+  // Generated once per mount (a fresh burst each time the overlay opens), not per render —
+  // see the useState initializer below.
+  const [pieces] = useState(() => Array.from({ length: 70 }, (_, i) => ({
+    id: i,
+    left: Math.random() * 100,
+    delay: Math.random() * 0.3,
+    duration: 2.4 + Math.random() * 1.4,
+    drift: Math.round((Math.random() - 0.5) * 220),
+    spin: Math.round(360 + Math.random() * 360) * (Math.random() < 0.5 ? -1 : 1),
+    color: CONFETTI_COLORS[i % CONFETTI_COLORS.length],
+    wide: Math.random() < 0.5
+  })));
+  return (
+    <div className="confetti" aria-hidden="true">
+      {pieces.map((p) => (
+        <i key={p.id} className={p.wide ? "w" : ""} style={{
+          left: p.left + "%", background: p.color,
+          animationDelay: p.delay + "s", animationDuration: p.duration + "s",
+          "--drift": p.drift + "px", "--spin": p.spin + "deg"
+        }} />
+      ))}
     </div>
   );
 }
@@ -1713,7 +1780,7 @@ function ChatView({ messages, busy, error, draft, setDraft, setDraftFromVoice, s
 let lastRevisionFirstId = null;
 
 function RevisionPanel({ speak, settings, T, Ts, corrections, updateMistakeStats, explanations, getExplanation,
-  showForecast, getClip, awardXp }) {
+  showForecast, getClip, awardXp, onComplete }) {
   const [rounds, setRounds] = useState([]);
   const [draft, setDraft] = useState("");
   const [draftFromVoice, setDraftFromVoice] = useState(false);
@@ -1894,6 +1961,7 @@ Verzin nooit fouten. Laat "reply_nl" en "new_words" leeg (dus "" en []).`;
       if (!nextRound || repeatsCurrent) {
         setError(Ts("Geen andere zinnen meer klaar voor revisie — kom later terug.",
           "No more sentences due for revision right now — check back later."));
+        onComplete?.();
       }
     } catch (e) {
       setError(String(e.message || e));
@@ -2516,7 +2584,7 @@ function WordsView({ ledger, speak, T, Ts, removeWord, requestMarkKnown, setting
 const normWord = (s) => String(s).toLowerCase().replace(CLEAN, "");
 const normSentence = (s) => String(s).toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, "").replace(/\s+/g, " ").trim();
 
-function LearnPanel({ ledger, vocab, speak, settings, T, Ts, updateWordStats, markKnown, prewarmWordPractice }) {
+function LearnPanel({ ledger, vocab, speak, settings, T, Ts, updateWordStats, markKnown, prewarmWordPractice, onComplete }) {
   const [current, setCurrent] = useState(null);
   const [answer, setAnswer] = useState("");
   const [result, setResult] = useState(null); // { ok, correct, note, corrections, mastered } | null
@@ -2574,7 +2642,9 @@ function LearnPanel({ ledger, vocab, speak, settings, T, Ts, updateWordStats, ma
 
   function next() {
     setAnswer(""); setResult(null); setSentence(""); setGenErr("");
-    setCurrent(pickNext());
+    const n = pickNext();
+    setCurrent(n);
+    if (!n) onComplete?.();
   }
 
   function pass() {

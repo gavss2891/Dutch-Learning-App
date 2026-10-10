@@ -8,7 +8,8 @@ export default defineConfig({
     open: true,
     proxy: {
       "/api": "http://localhost:8787",
-      "/audio": "http://localhost:8787"
+      "/audio": "http://localhost:8787",
+      "/gifs": "http://localhost:8787"
     }
   }
 });

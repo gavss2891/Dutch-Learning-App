@@ -457,3 +457,18 @@ html,body,#root{height:100%;margin:0;}
 @keyframes levelup-pop{0%{opacity:0;transform:scale(.85) translateY(8px);}100%{opacity:1;transform:scale(1) translateY(0);}}
 @keyframes levelup-spin{0%{opacity:0;transform:scale(.4) rotate(-25deg);}100%{opacity:1;transform:scale(1) rotate(0);}}
 @media(prefers-reduced-motion:reduce){.modal.levelup,.levelup-badge{animation:none;}}
+
+.levelup-gif{display:block;width:100%;max-width:220px;max-height:160px;object-fit:contain;
+  margin:0 auto 14px;border-radius:14px;}
+
+/* ---- confetti burst, rains in front of the celebration overlay ---- */
+.confetti{position:fixed;inset:0;pointer-events:none;overflow:hidden;z-index:55;}
+.confetti i{position:absolute;top:-14px;width:8px;height:14px;border-radius:2px;opacity:.9;
+  animation-name:confetti-fall;animation-timing-function:cubic-bezier(.25,.46,.45,.94);
+  animation-fill-mode:forwards;}
+.confetti i.w{width:12px;height:9px;}
+@keyframes confetti-fall{
+  0%{transform:translateY(0) translateX(0) rotate(0deg);opacity:1;}
+  100%{transform:translateY(100vh) translateX(var(--drift)) rotate(var(--spin));opacity:0;}
+}
+@media(prefers-reduced-motion:reduce){.confetti{display:none;}}
