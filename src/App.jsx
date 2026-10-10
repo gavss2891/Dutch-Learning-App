@@ -720,7 +720,10 @@ ${knownSample || "(nog geen lijst geïmporteerd — gebruik alleen de 500 meest 
       setMessages((m) => [...m, { role: "ai", reply, corrections: cors, newWords: fresh, at: stamp, ratio, revealed: false }]);
       if (settings.autoSave) {
         setCorrections((c) => [...c, ...cors]);
-        if (fresh.length) setLedger((l) => [...l, ...fresh]);
+        if (fresh.length) {
+          setLedger((l) => [...l, ...fresh]);
+          fresh.forEach((entry) => prewarmWordPractice(entry));
+        }
         // Fire-and-forget: doesn't block the reply, but by the time the learner reaches
         // revision mode the translation is almost always already cached and saved. Only
         // worth doing for corrections that are actually persisted — see saveCorrection()
@@ -789,8 +792,9 @@ ${knownSample || "(nog geen lijst geïmporteerd — gebruik alleen de 500 meest 
     setMessages((ms) => ms.map((m) => (m.newWords
       ? { ...m, newWords: m.newWords.map((x) => (x.lemma === w.lemma ? { ...x, saved: true } : x)) }
       : m)));
+    const entry = { ...w, saved: true };
     setLedger((list) => {
-      const next = [...list, { ...w, saved: true }];
+      const next = [...list, entry];
       setDaily((d) => {
         const k = today();
         const r = d[k] || emptyDay();
@@ -800,6 +804,7 @@ ${knownSample || "(nog geen lijst geïmporteerd — gebruik alleen de 500 meest 
       });
       return next;
     });
+    prewarmWordPractice(entry);
   }
 
   // Clicking a bolded word means "I already know this".
@@ -877,6 +882,33 @@ ${knownSample || "(nog geen lijst geïmporteerd — gebruik alleen de 500 meest 
       save(K.prog, { corrections, ledger: next, daily });
       return next;
     });
+  }
+
+  // Pre-generates star 2's dictation sentence (and warms its TTS clip) in the background,
+  // so the Learn page almost never has to generate either live. Called right when a word is
+  // added to the ledger, and again right after a failed star-2 attempt — the sentence just
+  // shown as the answer would be worth memorizing otherwise, so that one gets replaced with a
+  // fresh pre-generated one ready well before tomorrow's retry.
+  // Matched by lemma, not reference: unlike updateWordStats()/removeWord(), by the time this
+  // async call resolves the entry may already have been replaced by another patch (e.g. the
+  // nextDue bump a failed attempt applies right away).
+  async function prewarmWordPractice(entry) {
+    try {
+      const r = await fetch("/api/word-sentence", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ word: entry.word, lemma: entry.lemma, en: entry.en,
+          knownWords: vocab.words, model: settings.model || undefined })
+      });
+      const d = await r.json();
+      const sentence = String(d.sentence || "").trim();
+      if (!r.ok || !sentence) return;
+      getClip(sentence, { library: false }).catch(() => {});
+      setLedger((l) => {
+        const next = l.map((w) => (w.lemma === entry.lemma ? { ...w, sentence } : w));
+        save(K.prog, { corrections, ledger: next, daily });
+        return next;
+      });
+    } catch { /* not fatal — the Learn page still generates it live on demand if this never lands */ }
   }
 
   // Called by revision mode after each practice round to update the underlying mistake's
@@ -1037,9 +1069,9 @@ ${knownSample || "(nog geen lijst geïmporteerd — gebruik alleen de 500 meest 
     ["chat", MessageSquare, "Gesprek", "Chat", null],
     ["reading", BookOpenText, "Leesoefening", "Reading", readingLibrary.length],
     ["revision", Languages, "Revisie", "Revision", revisionDueCount],
-    ["mistakes", AlertCircle, "Fouten", "Mistakes", corrections.length],
+    ["mistakes", AlertCircle, "Fouten", "Mistakes", null],
     ["words", Sparkles, "Nieuwe woorden", "New words", ledger.length],
-    ["vocab", BookOpen, "Woordenlijst", "Vocabulary", vocab.words.length],
+    ["vocab", BookOpen, "Woordenlijst", "Vocabulary", null],
     ["library", Headphones, "Audiobibliotheek", "Audio library", null],
     ["progress", TrendingUp, "Voortgang", "Progress", null],
     ["settings", Settings, "Instellingen", "Settings", null]
@@ -1166,7 +1198,7 @@ Below: charts of error rate and daily activity.`],
           {tab === "words" && <WordsView {...{ ledger, speak, T, Ts, removeWord,
             requestMarkKnown, settings, goLearn }} />}
           {tab === "learn" && <LearnPanel {...{ ledger, vocab, speak, settings, T, Ts,
-            updateWordStats, markKnown }} />}
+            updateWordStats, markKnown, prewarmWordPractice }} />}
           {tab === "library" && <LibraryView {...{ settings, T, Ts, explanations, getExplanation, awardXp }} />}
           {tab === "progress" && <ProgressView {...{ daily, corrections, ledger, vocab, settings, T, Ts }} />}
           {tab === "settings" && <SettingsView {...{ settings, setSettings, voices, speak, getClip, vocab,
@@ -1828,8 +1860,17 @@ Verzin nooit fouten. Laat "reply_nl" en "new_words" leeg (dus "" en []).`;
         }))
         .filter((c) => c.corrected);
       const correct = cors.length === 0;
+      // queueNextRound() above was fired in parallel with judging this attempt, so it picked
+      // from the due pool before this sentence's own spaced-repetition state (below) had
+      // advanced. With only one sentence due, that pool still contained just this one, so a
+      // correct answer would otherwise get immediately re-served the exact sentence it just
+      // mastered. Drop that premature pick here — it hasn't been shown to the user yet.
+      const repeatsCurrent = correct && nextRound && nextRound.sourceId === current.sourceId;
 
-      setRounds((rs) => rs.map((r) => (r.id === current.id ? { ...r, attempt, result: cors } : r)));
+      setRounds((rs) => {
+        const next = rs.map((r) => (r.id === current.id ? { ...r, attempt, result: cors } : r));
+        return repeatsCurrent ? next.filter((r) => r.id !== nextRound.id) : next;
+      });
       if (countWords(attempt) >= 2) awardXp(fromVoice ? "speaking" : "writing", fromVoice ? XP.speaking : XP.writing);
       if (settings.autoplay) setTimeout(() => speak(current.targetNl), 220);
 
@@ -1850,7 +1891,7 @@ Verzin nooit fouten. Laat "reply_nl" en "new_words" leeg (dus "" en []).`;
         updateMistakeStats(mistake.id, { practiceCount, streak, nextDue, lastPracticedAt: Date.now() });
       }
 
-      if (!nextRound) {
+      if (!nextRound || repeatsCurrent) {
         setError(Ts("Geen andere zinnen meer klaar voor revisie — kom later terug.",
           "No more sentences due for revision right now — check back later."));
       }
@@ -2475,7 +2516,7 @@ function WordsView({ ledger, speak, T, Ts, removeWord, requestMarkKnown, setting
 const normWord = (s) => String(s).toLowerCase().replace(CLEAN, "");
 const normSentence = (s) => String(s).toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, "").replace(/\s+/g, " ").trim();
 
-function LearnPanel({ ledger, vocab, speak, settings, T, Ts, updateWordStats, markKnown }) {
+function LearnPanel({ ledger, vocab, speak, settings, T, Ts, updateWordStats, markKnown, prewarmWordPractice }) {
   const [current, setCurrent] = useState(null);
   const [answer, setAnswer] = useState("");
   const [result, setResult] = useState(null); // { ok, correct, note, corrections, mastered } | null
@@ -2484,6 +2525,7 @@ function LearnPanel({ ledger, vocab, speak, settings, T, Ts, updateWordStats, ma
   const [genErr, setGenErr] = useState("");
   const [genBusy, setGenBusy] = useState(false);
   const [streak, setStreak] = useState(0);          // this-session-only, ephemeral — pure gamification
+  const [genAttempt, setGenAttempt] = useState(0);  // bumped to retry star 2's sentence after a failed generation
   const startedRef = useRef(false);
   const iv = wordIntervalsOf(settings);
   const star = current ? (current.star || 0) : 0;   // 0,1,2 — index of the star being attempted
@@ -2505,9 +2547,13 @@ function LearnPanel({ ledger, vocab, speak, settings, T, Ts, updateWordStats, ma
   }, []);
 
   // Star 2's sentence is generated once per attempt, using ONLY the learner's real known
-  // words — a fresh one each time, so there's nothing to memorize on a retry.
+  // words — a fresh one each time, so there's nothing to memorize on a retry. Almost always
+  // already sitting on the entry by now — prewarmWordPractice() generates and caches it the
+  // moment the word is logged (and again after any failed attempt) — so this live fetch is
+  // just the fallback for whenever that background generation hasn't landed yet.
   useEffect(() => {
     if (!current || star !== 1) return;
+    if (current.sentence) { setSentence(current.sentence); setGenErr(""); setGenBusy(false); return; }
     let cancelled = false;
     setGenBusy(true); setGenErr("");
     fetch("/api/word-sentence", {
@@ -2524,7 +2570,7 @@ function LearnPanel({ ledger, vocab, speak, settings, T, Ts, updateWordStats, ma
       .finally(() => { if (!cancelled) setGenBusy(false); });
     return () => { cancelled = true; };
     // eslint-disable-next-line
-  }, [current, star]);
+  }, [current, star, genAttempt]);
 
   function next() {
     setAnswer(""); setResult(null); setSentence(""); setGenErr("");
@@ -2547,7 +2593,13 @@ function LearnPanel({ ledger, vocab, speak, settings, T, Ts, updateWordStats, ma
 
   function fail(extra) {
     setStreak(0);
-    updateWordStats(current, { nextDue: addDays(startOfDay(Date.now()), 1) });
+    const patch = { nextDue: addDays(startOfDay(Date.now()), 1) };
+    // A failed star 2 attempt shows the correct sentence as the answer — reusing it on the
+    // retry would turn tomorrow's dictation into a memory test instead. Clear it so a stale
+    // reuse never slips through, and kick off a replacement now, well ahead of the retry.
+    if (star === 1) patch.sentence = null;
+    updateWordStats(current, patch);
+    if (star === 1) prewarmWordPractice(current);
     setResult({ ok: false, ...extra });
   }
 
@@ -2666,7 +2718,14 @@ function LearnPanel({ ledger, vocab, speak, settings, T, Ts, updateWordStats, ma
             {T("Luister naar een zin — alleen woorden die je al kent worden gebruikt, plus dit ene nieuwe woord.",
               "Listen to a sentence — only words you already know are used, plus this one new word.")}
           </p>
-          {genErr && <div className="note err">{genErr}</div>}
+          {genErr && (
+            <div className="note err" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
+              <span>{genErr}</span>
+              <button className="btn g" style={{ flexShrink: 0 }} onClick={() => { setGenErr(""); setGenAttempt((n) => n + 1); }}>
+                {Ts("Opnieuw proberen", "Try again")}
+              </button>
+            </div>
+          )}
           {genBusy && <div className="lbl">{Ts("Zin maken…", "Generating sentence…")}</div>}
           {sentence && !genBusy && (
             <button className="btn g" style={{ marginBottom: 14 }}
@@ -2675,7 +2734,7 @@ function LearnPanel({ ledger, vocab, speak, settings, T, Ts, updateWordStats, ma
             </button>
           )}
           <input className="inp" value={answer} onChange={(e) => setAnswer(e.target.value)}
-            disabled={genBusy} autoFocus
+            disabled={genBusy || !sentence} autoFocus
             onKeyDown={(e) => { if (e.key === "Enter") checkStar2(); }}
             placeholder={Ts("Typ de zin…", "Type the sentence…")} />
           <button className="btn" style={{ marginTop: 12 }} disabled={!answer.trim() || busy || genBusy} onClick={checkStar2}>
